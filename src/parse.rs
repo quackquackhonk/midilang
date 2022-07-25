@@ -44,18 +44,12 @@ pub enum MParseError {
 fn c_major(vals: Vec<u8>) -> Option<MASTNode> {
     // unwrap is safe, we will never deal with an empty vector
     let root = vals.get(0).unwrap() % 12;
-    // to calculate the argument:
-    // 1. ignore stacked octaves
-    // 2. 
     let mut amount: i32 = 1;
     let mut base = None;
     for vv in vals[1..].iter() {
         if let Some(bb) = base {
             amount = amount + (2_i32.pow(u32::from(vv - bb)));
         } else {
-            if vv % 12 == root {
-                continue;
-            }
             base = Some(vv);
         }
     };

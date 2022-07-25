@@ -20,6 +20,5 @@ Wish me luck :)
 
 - [ ] Come up with a better name
 - [ ] Design Semantics
-- [ ] Midi Parser
-- [ ] Lexer
+- [ ] Parser
 - [ ] Figure out how to turn into machine code
