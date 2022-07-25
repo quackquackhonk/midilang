@@ -1,10 +1,7 @@
 
 use std::collections::BinaryHeap;
-use std::thread::current;
-use std::{fmt, error::Error};
 
-use midly::num::u7;
-use midly::{MidiMessage, TrackEventKind};
+use midly::MidiMessage;
 
 /// Defines the Abstract Syntax Tree (AST) for midilang.
 /// 
@@ -28,7 +25,7 @@ pub enum MASTNode {
     MoveLeft(i32),
     MoveRight(i32),
     Read,
-    Write,
+    Write, /// do we need to capture input?
     JumpZero,
     JumpNotZero
 }
@@ -44,9 +41,24 @@ pub enum MParseError {
 }
 
 // A key is a function turning a list of notes into an MASTNode
-fn c_major(&vals: &Vec<u8>) -> Option<MASTNode> {
-    let root = vals.pop().e;
-    let mut amount = 1;
+fn c_major(vals: Vec<u8>) -> Option<MASTNode> {
+    // unwrap is safe, we will never deal with an empty vector
+    let root = vals.get(0).unwrap() % 12;
+    // to calculate the argument:
+    // 1. ignore stacked octaves
+    // 2. 
+    let mut amount: i32 = 1;
+    let mut base = None;
+    for vv in vals[1..].iter() {
+        if let Some(bb) = base {
+            amount = amount + (2_i32.pow(u32::from(vv - bb)));
+        } else {
+            if vv % 12 == root {
+                continue;
+            }
+            base = Some(vv);
+        }
+    };
     match root {
         0 => Some(JumpNotZero),
         2 => Some(MoveLeft(amount)),
@@ -54,8 +66,7 @@ fn c_major(&vals: &Vec<u8>) -> Option<MASTNode> {
         5 => Some(DecrementCell(amount)),
         7 => Some(JumpZero),
         9 => Some(IncrementCell(amount)),
-        // TODO: need to read and write
-        11 => Some(Read),
+        11 => Some(if amount == 1 {Write} else {Read}),
         _ => None
     }
 }
@@ -75,21 +86,21 @@ pub fn parse(midi: midly::Smf) -> MParseResult {
 
     for te in midi.tracks[0].iter() {
 
-        if let midly::TrackEventKind::Midi{channel, message} = te.kind {
-            if let MidiMessage::NoteOn{key, vel} = message {
+        if let midly::TrackEventKind::Midi{channel: _, message} = te.kind {
+            if let MidiMessage::NoteOn{key, vel: _} = message {
                 println!("{:?}", message);
                 // if the note starts at the same time 
                 if te.delta == 0 {
-                    &current_node.push(u8::from(key));
+                    current_node.push(u8::from(key));
                 }
                 else {
-                    match program_key(&current_node.into_sorted_vec()) {
+                    match program_key(current_node.into_sorted_vec()) {
                         Some(node) => {
                             &prog.push(node);
-                            let mut current_node = BinaryHeap::<u8>::from([u8::from(key)]);
                         },
                         None => return Err(MParseError::NonDiatonic)
                     }
+                    current_node = BinaryHeap::<u8>::from([u8::from(key)]);
                 }
             }
         }
