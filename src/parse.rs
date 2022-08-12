@@ -1,6 +1,7 @@
 
 use std::collections::BinaryHeap;
 
+use log::{debug, info};
 use midly::MidiMessage;
 
 /// Defines the Abstract Syntax Tree (AST) for midilang.
@@ -37,7 +38,7 @@ pub type MParseResult<T> = Result<T, MParseError>;
 #[derive(Debug, PartialEq)]
 pub enum MParseError {
     NoTracks,
-    UnclosedLoop(usize),
+    UnclosedLoop(Vec<usize>),
     DanglingLoop(usize),
     NonDiatonic,
 }
@@ -84,6 +85,8 @@ fn c_major(root: u8, arg: u32) -> MParseResult<MASTNode> {
 
 pub fn parse(midi: midly::Smf) -> MParseResult<MidiAST> { 
 
+    info!("Starting to parse MIDI file...");
+
     let mut prog = Vec::new();
 
     // TODO: Figure out what song the key is in, for now everything is in C major
@@ -95,25 +98,27 @@ pub fn parse(midi: midly::Smf) -> MParseResult<MidiAST> {
 
     let mut current_node = BinaryHeap::<u8>::new();
     let mut loop_stack = Vec::<usize>::new();
+    debug!("MIDI File Header: {:?}", midi.header);
     for track in midi.tracks {
         let mut notes_on: i32 = 0;
         for (idx, te) in track.iter().enumerate() {
             if let midly::TrackEventKind::Midi{channel: _, message} = te.kind {
-                println!("Found {:?}", message);
+                debug!("Processing {:?}", message);
                 match message {
                     MidiMessage::NoteOn{key, vel: _} => {
-                        println!("\t\tpushing {:?} into bh", key);
+                        debug!("{} pressed: {} -> {}", key, notes_on, notes_on + 1);
                         current_node.push(u8::from(key));
                         notes_on += 1;
-                        println!("\t\tnum on: {}", notes_on);
                     },
-                    MidiMessage::NoteOff{..} => {
+                    MidiMessage::NoteOff{key, ..} => {
+                        debug!("{} released: {} -> {}", key, notes_on, notes_on -1);
                         notes_on -= 1;
-                        println!("\t\tnum on: {}", notes_on);
                         if notes_on == 0 {
-                            println!("\t\ttrying to parse {:?}", current_node);
+                            debug!("All notes are off, parsing instruction...");
+                            debug!("parsing {:?}", current_node);
                             match program_key(current_node.into_sorted_vec()) {
                                 Ok(node) => {
+                                    debug!("Parsing successful: {:?}", node);
                                     match node {
                                         JumpNotZero => {
                                             if loop_stack.pop().is_none() {
@@ -133,16 +138,15 @@ pub fn parse(midi: midly::Smf) -> MParseResult<MidiAST> {
                             current_node = BinaryHeap::<u8>::new();
                         }
                     },
-                    // _ => ()
                     _ => {
-                        println!("\tIgnoring...")
+                        debug!("Ignoring non-midi message...");
                     }
                 }
             }
         }
     }
     if !loop_stack.is_empty() {
-        return Err(MParseError::UnclosedLoop(loop_stack.pop().unwrap()))
+        return Err(MParseError::UnclosedLoop(loop_stack))
     }
     Ok(prog)
 
