@@ -75,16 +75,16 @@ pub enum MidiInstructionKind {
 
 impl MidiInstruction {
 
-    fn new_inc(position: Option<Position>, amount: Cell) -> Self {
+    fn new_inc(amount: Cell) -> Self {
         MidiInstruction {
-            position,
+            position: None,
             instruction: IncrementCell { amount }
         }
     }
 
-    fn new_move(position: Option<Position>, amount: isize) -> Self {
+    fn new_move(amount: isize) -> Self {
         MidiInstruction {
-            position,
+            position: None,
             instruction: MovePointer { amount }
         }
     }
@@ -103,16 +103,16 @@ impl MidiInstruction {
         }
     }
 
-    fn new_output(position: Option<Position>) -> Self {
+    fn new_output() -> Self {
         MidiInstruction {
-            position,
+            position: None,
             instruction: OutputCell
         }
     }
 
-    fn new_input(position: Option<Position>) -> Self {
+    fn new_input() -> Self {
         MidiInstruction {
-            position,
+            position: None,
             instruction: InputCell
         }
     }
@@ -240,16 +240,15 @@ fn parse_chord<F: Fn(u8, i8) -> MParseResult<MidiInstruction>>(vals: Vec<u8>, ke
 
 
 fn c_major(root: u8, arg: i8) -> MParseResult<MidiInstruction> {
-    let position = None;
     match root {
         0 => Ok(MidiInstruction::new_close_loop()),
-        2 => Ok(MidiInstruction::new_move(position, -isize::from(arg))),
-        4 => Ok(MidiInstruction::new_move(position, isize::from(arg))),
-        5 => Ok(MidiInstruction::new_inc(position, Wrapping(-arg))),
+        2 => Ok(MidiInstruction::new_move(-isize::from(arg))),
+        4 => Ok(MidiInstruction::new_move(isize::from(arg))),
+        5 => Ok(MidiInstruction::new_inc(Wrapping(-arg))),
         7 => Ok(MidiInstruction::new_open_loop()),
-        9 => Ok(MidiInstruction::new_inc(position, Wrapping(arg))),
-        11 if arg == 1 => Ok(MidiInstruction::new_input(position)),
-        11 => Ok(MidiInstruction::new_output(position)),
+        9 => Ok(MidiInstruction::new_inc(Wrapping(arg))),
+        11 if arg == 1 => Ok(MidiInstruction::new_input()),
+        11 => Ok(MidiInstruction::new_output()),
         _ => Err(MParseError::NonDiatonic)
     }
 }
@@ -316,7 +315,6 @@ mod tests {
 
     #[test]
     fn parse_chord_c_major_no_args() {
-        let position = None;
         let key = |xx| parse_chord(xx, &c_major);
         let tonic = Vec::from([0]);
         let supertonic = Vec::from([2]);
@@ -327,31 +325,26 @@ mod tests {
         let leading_tone = Vec::from([11]);
         let non_diatonic = Vec::from([8]);
         assert_eq!(key(tonic).unwrap(), MidiInstruction::new_close_loop());
-        assert_eq!(key(supertonic).unwrap(), MidiInstruction::new_move(position, -1));
-        assert_eq!(key(mediant).unwrap(), MidiInstruction::new_move(position, 1));
-        assert_eq!(key(subdominant).unwrap(), MidiInstruction::new_inc(position, Wrapping(-1)));
+        assert_eq!(key(supertonic).unwrap(), MidiInstruction::new_move(-1));
+        assert_eq!(key(mediant).unwrap(), MidiInstruction::new_move(1));
+        assert_eq!(key(subdominant).unwrap(), MidiInstruction::new_inc(Wrapping(-1)));
         assert_eq!(key(dominant).unwrap(), MidiInstruction::new_open_loop());
-        assert_eq!(key(submediant).unwrap(), MidiInstruction::new_inc(position, Wrapping(1)));
-        assert_eq!(key(leading_tone).unwrap(), MidiInstruction::new_input(position));
+        assert_eq!(key(submediant).unwrap(), MidiInstruction::new_inc(Wrapping(1)));
+        assert_eq!(key(leading_tone).unwrap(), MidiInstruction::new_input());
         assert_eq!(key(non_diatonic).unwrap_err(), MParseError::NonDiatonic);
     }
 
     #[test]
-    fn c_major_args() {
-        let position = None;
+    fn parse_chord_c_major_args() {
         let key = |xx| parse_chord(xx, &c_major);
         // ignores arguments
         let tonic_chord = Vec::from([0, 12, 16, 18]);
-        // 10000b = 16
-        let supertonic_chord = Vec::from([26, 33, 38]);
-        // 1010b = 10
-        let mediant_chord = Vec::from([40, 44, 46, 48]);
-        // 10b = 2
-        let subdominant_chord = Vec::from([17, 29, 31]);
+        let supertonic_chord = Vec::from([26, 33, 38]); // 10000b = 16
+        let mediant_chord = Vec::from([40, 44, 46, 48]); // 1010b = 10
+        let subdominant_chord = Vec::from([17, 29, 31]); // 10b = 2
         // ignores arguments
         let dominant_chord = Vec::from([7, 100]);
-        // 100b = 4
-        let submediant_chord = Vec::from([9, 27, 30]);
+        let submediant_chord = Vec::from([9, 27, 30]); // 100b = 4
         // leading tone with 1 other note = Write
         // leading tone with >=2 other notes = Read
         let leading_tone_octave = Vec::from([11, 23]);
@@ -359,14 +352,56 @@ mod tests {
         // ignores arguments
         let non_diatonic = Vec::from([8, 10, 22]);
         assert_eq!(key(tonic_chord).unwrap(), MidiInstruction::new_close_loop());
-        assert_eq!(key(supertonic_chord).unwrap(), MidiInstruction::new_move(position, -16));
-        assert_eq!(key(mediant_chord).unwrap(), MidiInstruction::new_move(position, 10));
-        assert_eq!(key(subdominant_chord).unwrap(), MidiInstruction::new_inc(position, Wrapping(-2)));
+        assert_eq!(key(supertonic_chord).unwrap(), MidiInstruction::new_move(-16));
+        assert_eq!(key(mediant_chord).unwrap(), MidiInstruction::new_move(10));
+        assert_eq!(key(subdominant_chord).unwrap(), MidiInstruction::new_inc(Wrapping(-2)));
         assert_eq!(key(dominant_chord).unwrap(), MidiInstruction::new_open_loop());
-        assert_eq!(key(submediant_chord).unwrap(), MidiInstruction::new_inc(position, Wrapping(4)));
-        assert_eq!(key(leading_tone_octave).unwrap(), MidiInstruction::new_input(position));
-        assert_eq!(key(leading_tone_chord).unwrap(), MidiInstruction::new_output(position));
+        assert_eq!(key(submediant_chord).unwrap(), MidiInstruction::new_inc(Wrapping(4)));
+        assert_eq!(key(leading_tone_octave).unwrap(), MidiInstruction::new_input());
+        assert_eq!(key(leading_tone_chord).unwrap(), MidiInstruction::new_output());
         assert_eq!(key(non_diatonic).unwrap_err(), MParseError::NonDiatonic);
     }
 
+    #[test]
+    fn build_no_loops() {
+        let mut mast_builder = MidiASTBuilder::new();
+        assert!(mast_builder.push(MidiInstruction::new_inc(Wrapping(10))).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_move(1)).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_inc(Wrapping(-5))).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_move(1)).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_inc(Wrapping(15))).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_move(1)).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_move(1)).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_move(1)).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_inc(Wrapping(3))).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_move(1)).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_inc(Wrapping(4))).is_ok());
+        match mast_builder.into_mast() {
+            Err(_) => panic!(),
+            Ok(prog) => {
+                assert_eq!(prog.len(), 11);
+                assert_eq!(mast_builder.size, 11);
+            }
+        }
+        // mast_builder.push
+    }
+
+    #[test]
+    fn build_simple_loop() {
+        let mut mast_builder = MidiASTBuilder::new();
+        assert!(mast_builder.push(MidiInstruction::new_open_loop()).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_move(12)).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_inc(Wrapping(12))).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_move(12)).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_inc(Wrapping(-1))).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_close_loop()).is_ok());
+        match mast_builder.into_mast() {
+            Err(_) => panic!(),
+            Ok(mut prog) => {
+                assert_eq!(prog.len(), 1);
+                assert_eq!(mast_builder.size, 6);
+                assert_eq!(prog.pop().unwrap().position.unwrap(), Position::new(0, 5));
+            }
+        }
+    }
 }
