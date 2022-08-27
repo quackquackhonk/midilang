@@ -1,7 +1,6 @@
 use clap::Parser;
-use log::{self, LevelFilter, error};
+use log::{self, LevelFilter, error, info};
 use env_logger::{self, Builder, WriteStyle, Target};
-use midilang::parse::MParseError;
 
 /// A Program to compile midi into executable code
 #[derive(Parser, Debug)]
@@ -15,7 +14,7 @@ struct MidilangCli {
     file_name: Option<String>,
 
     #[clap(long, value_parser, value_name = "BF_FILE")]
-    brainfuck: Option<String>,
+    bf: Option<String>,
 
     #[clap(short, long, action)]
     debug: bool,
@@ -27,19 +26,22 @@ struct MidilangCli {
 fn main() {
     let cli_args = MidilangCli::parse();
 
-    let log_builder = Builder::new()
-            .filter(None, if cli_args.debug {LevelFilter::Trace} else {LevelFilter::Warn})
-            .write_style(WriteStyle::Auto)
-            .target(if cli_args.verbose {Target::Stdout} else {Target::Stderr} )
-            .init();
+    Builder::new()
+        .filter(None, if cli_args.debug {LevelFilter::Trace} else {LevelFilter::Warn})
+        .write_style(WriteStyle::Auto)
+        .target(if cli_args.verbose {Target::Stdout} else {Target::Stderr} )
+        .init();
 
-    if let Some(bf) = cli_args.brainfuck {
-        midilang::from_brainfuck(&bf);
+    if let Some(bf) = cli_args.bf {
+        match midilang::from_brainfuck(&bf) {
+            Err(e) => error!("Error when parsing BF file: {}", e),
+            Ok(_) => info!("BF File parsed successfully!")
+        }
     }
     if let Some(path) = cli_args.file_name {
-        match midilang::run(&path) {
+        match midilang::compile_file(&path) {
             Err(e) => error!("Application Error {}", e),
-            Ok(x) => println!("Ran successfully!")
+            Ok(_) => info!("Ran successfully!")
         }
     }
 }

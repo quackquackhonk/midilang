@@ -9,35 +9,27 @@ use midly::num::u28;
 use midly::num::u7;
 use midly::{Smf, MidiMessage, TrackEvent, TrackEventKind, Format, Timing, Header, Track};
 
-pub mod parse;
-use crate::parse::{self, MParseError};
+pub mod parser;
+pub mod compiler;
+// use crate::parser::MParseError;
 
-pub fn run(file_path: &str) -> Result<i32, Box<dyn Error>> {
+// compiles 
+pub fn compile_file(file_path: &str) -> Result<i32, Box<dyn Error>> {
     info!("Reading MIDI file from {}", &file_path);
     // read file
     let bytes = fs::read(file_path)?;
     let midi = Smf::parse(&bytes)?;
 
     // parse midi SMF into midi program AST
-    let mprog = parse::parse(midi);
-    info!("{:?}", mprog);
-    if let Err(me) = mprog {
-        match me {
-            MParseError::NoTracks => error!("{} had no tracks to parse.", &file_path),
-            MParseError::NonDiatonic => error!("Found non-diatonic note when parsing {}", &file_path),
-            MParseError::UnclosedLoop(ls) => { 
-                error!("Found unclosed loops when parsing {} at position(s) {:#?}", &file_path, ls);
-            },
-            MParseError::DanglingLoop(pos) => {
-                error!("Found dangling close loop when parsing {} @ TrackEvent # {}", &file_path, pos)
-            }
-        }
-        // return error code
+    if let Err(mperr) = parser::parse(midi) {
+        error!("Error when parsing file: {:?}", mperr);
         return Ok(1)
     }
-    // llvm_ir::generate(mprog.unwrap());
+
+    // compiler::compile(midi_program);
     Ok(0)
 }
+
 
 // fn run_interactive() -> Result<i32, Box<dyn Error>> {
 //     unimplemented!()
@@ -76,8 +68,10 @@ pub fn from_brainfuck(bf_file_path: &str) -> Result<(), Box<dyn Error>> {
                                  .create(true)
                                  .open(&ml_file_path)?;
     let mut ml_prog = Smf::new(Header::new(Format::Parallel, Timing::Metrical(u15::from(480))));
+
     // TODO: Add meta track information
     ml_prog.tracks.push(Track::new()); // meta track is idx 0
+
     ml_prog.tracks.push(Track::new()); // program track is [1]
     for inst in bf_program.chars() {
         let key = match inst {
