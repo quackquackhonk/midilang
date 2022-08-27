@@ -404,4 +404,46 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn build_nested_loop() {
+        let mut mast_builder = MidiASTBuilder::new();
+        assert!(mast_builder.push(MidiInstruction::new_inc(Wrapping(4))).is_ok());
+
+        assert!(mast_builder.push(MidiInstruction::new_open_loop()).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_move(1)).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_inc(Wrapping(2))).is_ok());
+
+        assert!(mast_builder.push(MidiInstruction::new_open_loop()).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_move(1)).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_inc(Wrapping(1))).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_move(-1)).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_inc(Wrapping(-1))).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_close_loop()).is_ok());
+
+        assert!(mast_builder.push(MidiInstruction::new_move(-1)).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_inc(Wrapping(-1))).is_ok());
+        assert!(mast_builder.push(MidiInstruction::new_close_loop()).is_ok());
+        match mast_builder.into_mast() {
+            Err(e) => panic!("{:?}", e),
+            Ok(mut prog) => {
+                assert_eq!(prog.len(), 2);
+                assert_eq!(mast_builder.size, 13);
+                if let MidiInstruction { 
+                    position: pos,
+                    instruction: Loop {
+                        body: mut loop_body
+                    }
+                } = prog.pop().unwrap() {
+                    assert_eq!(pos, Some(Position::new(1, 12)));
+                    assert_eq!(loop_body.len(), 5);
+                    loop_body.pop().unwrap();
+                    loop_body.pop().unwrap();
+                    let MidiInstruction { position: pos2, instruction: _ } = loop_body.pop().unwrap();
+                    assert_eq!(pos2, Some(Position::new(4, 9)));
+                }
+            }
+        }
+
+    }
 }
