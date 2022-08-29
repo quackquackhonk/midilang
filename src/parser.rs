@@ -54,8 +54,8 @@ impl Debug for Position {
         // Loops with position: `Some(_)` are used for open loops
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct MidiInstruction {
-    position: Option<Position>,
-    instruction: MidiInstructionKind
+    pub position: Option<Position>,
+    pub instruction: MidiInstructionKind
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
