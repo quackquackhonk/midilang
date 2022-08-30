@@ -192,7 +192,7 @@ pub type MidiAST = Vec<MidiInstruction>;
 
 pub type MParseResult<T> = Result<T, MParseError>;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub enum MParseError {
     NoTracks,
     UnclosedLoop(Vec<Position>),
@@ -214,7 +214,7 @@ impl Debug for MParseError {
 
 fn parse_chord<F: Fn(u8, i8) -> MParseResult<MidiInstruction>>(vals: Vec<u8>, key: &F) -> MParseResult<MidiInstruction> {
     // unwrap is safe, we will never deal with an empty vector
-    let root = vals.get(0).unwrap() % 12;
+    let root = vals.first().unwrap() % 12;
     let mut arg = None;
     let mut base = None;
     let mut prev = root;

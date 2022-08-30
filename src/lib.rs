@@ -3,10 +3,7 @@ use std::error::Error;
 use std::io::Read;
 use std::fs::{self, File};
 use log::{info, error, debug};
-use midly::num::u15;
-use midly::num::u4;
-use midly::num::u28;
-use midly::num::u7;
+use midly::num::{ u15, u4, u28, u7 };
 use midly::{Smf, MidiMessage, TrackEvent, TrackEventKind, Format, Timing, Header, Track};
 
 pub mod parser;
@@ -105,15 +102,4 @@ pub fn from_brainfuck(bf_file_path: &str) -> Result<(), Box<dyn Error>> {
     }
     info!("BF parsing successful!");
     Ok(())
-}
-
-
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
 }
