@@ -69,7 +69,7 @@ pub enum MidiInstructionKind {
     OutputCell,
     InputCell,
     Loop {
-        body: MidiAST
+        body: Vec<MidiInstruction>
     }
 }
 
@@ -122,12 +122,42 @@ impl MidiInstruction {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct PointerMovement {
+    pub highest_reached: usize,
+    pub current_position: usize,
+}
 
-// pub type MidiAST = Vec<MidiInstruction>;
+impl PointerMovement {
+    fn new() -> Self {
+        PointerMovement {
+            highest_reached: 0,
+            current_position: 0
+        }
+    }
+
+    fn add_move(&mut self, amount: isize) {
+        if amount > 0 {
+            if let Some(x) = self.current_position.checked_add(amount as usize) {
+                self.current_position = x
+            }
+
+            if self.highest_reached < self.current_position {
+                self.highest_reached = self.current_position;
+            }
+        }
+        else if let Some(x) = self.current_position.checked_sub(amount.unsigned_abs()) {
+            self.current_position = x
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct MidiASTBuilder {
-    body: MidiAST,
+    body: Vec<MidiInstruction>,
     size: usize,
-    loop_stack: Vec<(MidiAST, usize)>
+    movement: PointerMovement,
+    loop_stack: Vec<(Vec<MidiInstruction>, usize)>
 }
 
 impl MidiASTBuilder {
@@ -135,6 +165,7 @@ impl MidiASTBuilder {
         MidiASTBuilder {
             body: Vec::<MidiInstruction>::new(),
             size: 0,
+            movement: PointerMovement::new(),
             loop_stack: vec![],
         }        
     }
@@ -162,6 +193,9 @@ impl MidiASTBuilder {
                 }
             },
             _ => {
+                if let MovePointer { amount } = inst.instruction {
+                    self.movement.add_move(amount);
+                }
                 inst.set_position(Position::new(self.size, self.size));
                 self.body.push(inst);
             }
@@ -170,9 +204,17 @@ impl MidiASTBuilder {
         Ok(())
     }
 
+    pub fn highest_cell(&self) -> usize {
+        self.movement.highest_reached
+    }
+
     pub fn into_mast(&self) -> MParseResult<MidiAST> {
         if self.loop_stack.is_empty() {
-            Ok(self.body.to_owned())
+            Ok(MidiAST {
+                tape: self.body.to_owned(),
+                size: self.size,
+                movement: self.movement
+            })
         } else {
             let loops = self.loop_stack.iter()
                                        .map(|(_b, start)| Position::new(*start, *start))
@@ -188,7 +230,12 @@ impl Default for MidiASTBuilder {
     }
 }
 
-pub type MidiAST = Vec<MidiInstruction>;
+#[derive(Debug, PartialEq, Eq)]
+pub struct MidiAST {
+    pub tape: Vec<MidiInstruction>,
+    pub size: usize,
+    movement: PointerMovement
+}
 
 pub type MParseResult<T> = Result<T, MParseError>;
 
@@ -379,8 +426,10 @@ mod tests {
         match mast_builder.into_mast() {
             Err(_) => panic!(),
             Ok(prog) => {
-                assert_eq!(prog.len(), 11);
+                assert_eq!(prog.tape.len(), 11);
                 assert_eq!(mast_builder.size, 11);
+                assert_eq!(prog.movement.highest_reached, 6);
+                assert_eq!(prog.movement.current_position, 6);
             }
         }
         // mast_builder.push
@@ -398,9 +447,10 @@ mod tests {
         match mast_builder.into_mast() {
             Err(_) => panic!(),
             Ok(mut prog) => {
-                assert_eq!(prog.len(), 1);
+                assert_eq!(prog.tape.len(), 1);
+                assert_eq!(prog.size, 6);
                 assert_eq!(mast_builder.size, 6);
-                assert_eq!(prog.pop().unwrap().position.unwrap(), Position::new(0, 5));
+                assert_eq!(prog.tape.pop().unwrap().position.unwrap(), Position::new(0, 5));
             }
         }
     }
@@ -427,14 +477,14 @@ mod tests {
         match mast_builder.into_mast() {
             Err(e) => panic!("{:?}", e),
             Ok(mut prog) => {
-                assert_eq!(prog.len(), 2);
+                assert_eq!(prog.tape.len(), 2);
                 assert_eq!(mast_builder.size, 13);
                 if let MidiInstruction { 
                     position: pos,
                     instruction: Loop {
                         body: mut loop_body
                     }
-                } = prog.pop().unwrap() {
+                } = prog.tape.pop().unwrap() {
                     assert_eq!(pos, Some(Position::new(1, 12)));
                     assert_eq!(loop_body.len(), 5);
                     loop_body.pop().unwrap();
