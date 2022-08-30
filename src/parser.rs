@@ -210,11 +210,7 @@ impl MidiASTBuilder {
 
     pub fn into_mast(&self) -> MParseResult<MidiAST> {
         if self.loop_stack.is_empty() {
-            Ok(MidiAST {
-                tape: self.body.to_owned(),
-                size: self.size,
-                movement: self.movement
-            })
+            Ok(MidiAST::new(self.body.to_owned(), self.size, self.movement))
         } else {
             let loops = self.loop_stack.iter()
                                        .map(|(_b, start)| Position::new(*start, *start))
@@ -235,6 +231,16 @@ pub struct MidiAST {
     pub tape: Vec<MidiInstruction>,
     pub size: usize,
     movement: PointerMovement
+}
+
+impl MidiAST {
+    pub fn new(tape: Vec<MidiInstruction>, size: usize, movement: PointerMovement) -> Self {
+        MidiAST { tape, size, movement }
+    }
+
+    pub fn highest_cell(&self) -> usize {
+        self.movement.highest_reached
+    }
 }
 
 pub type MParseResult<T> = Result<T, MParseError>;
