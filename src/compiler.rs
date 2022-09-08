@@ -1,12 +1,30 @@
-use core::ffi::c_uint;
 use llvm_sys::core::*;
 use llvm_sys::prelude::*;
 use llvm_sys::target::*;
+use llvm_sys::target_machine::*;
 use llvm_sys::{LLVMBuilder, LLVMModule};
 use log::debug;
 use std::ffi::{CStr, CString};
+use std::fmt;
+use std::ptr::null_mut;
 
-use crate::parser::{Cell, MidiAST, MidiInstruction, MidiInstructionKind::*};
+use crate::parser::MidiAST;
+
+pub enum MCompileError {
+    LLVMError(String),
+    UninitializedContext,
+}
+
+impl fmt::Debug for MCompileError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LLVMError(msg) => write!(f, "LLVM raised an error {}", msg),
+            Self::UninitializedContext => write!(f, "Compiler Context was not initialized!"),
+        }
+    }
+}
+
+pub type MCompileResult<T> = Result<T, MCompileError>;
 
 // some wrappings on LLVM constructs
 // Lots of code here is taken from wilfreds bfc compiler:
@@ -14,7 +32,10 @@ use crate::parser::{Cell, MidiAST, MidiInstruction, MidiInstructionKind::*};
 const LLVM_FALSE: LLVMBool = 0;
 const LLVM_TRUE: LLVMBool = 1;
 
-unsafe fn int1
+unsafe fn int1(val: u64) -> LLVMValueRef {
+    LLVMConstInt(LLVMInt1Type(), val, LLVM_FALSE)
+}
+
 /// Convert this integer to LLVM's representation of a constant
 /// integer.
 unsafe fn int8(val: u64) -> LLVMValueRef {
@@ -91,19 +112,21 @@ impl MidiCompiler {
         mm
     }
 
-    fn init(&mut self, num_cells: u64) {
+    fn init(&mut self, num_cells: u64) -> MCompileResult<()> {
         self.add_c_declarations();
         let main_fn = self.add_main_fn();
-        let blocks @ Some((init_bb, start_bb)) = self.add_initial_blocks(main_fn);
-        self.blocks = blocks;
+        let (init_bb, start_bb) = self.add_initial_blocks(main_fn);
+        self.blocks = Some((init_bb, start_bb));
         self.position_builder_at_end(init_bb);
         let cells_ptr = self.allocate_cells(num_cells);
-        let cell_idx_ptr = self.create_cells_idx_ptr();
+        let cell_idx_ptr = self.create_cell_idx_ptr();
         self.context = Some(MidiContext {
             cells_ptr,
             cell_idx_ptr,
             main_fn,
-        })
+        });
+        self.position_builder_at_end(start_bb);
+        Ok(())
     }
 
     fn add_c_declarations(&mut self) {
@@ -142,15 +165,24 @@ impl MidiCompiler {
             // memset(cells, num_cells, 0, 0)
             let zero_i8 = int8(0);
             let one_i32 = int32(0);
-            let mut memset_args = vec![cells_ptr, zero_i8, num_cells_llvm, one_i32, LLVM_FALSE];
+            let false_i1 = int1(0);
+            let mut memset_args = vec![cells_ptr, zero_i8, num_cells_llvm, one_i32, false_i1];
             self.add_function_call("llvm.memset.p0i8.i32", &mut memset_args, "");
 
             cells_ptr
-        };
+        }
     }
 
     fn create_cell_idx_ptr(&mut self) -> LLVMValueRef {
         // char* cell_idx_ptr = cells;
+        unsafe {
+            // allocate stack space for the pointer
+            let cell_idx_ptr = LLVMBuildAlloca(self.builder, int32_type(), self.new_string_ptr("cell_idx_ptr"));
+
+            // set initial value to 0
+            LLVMBuildStore(self.builder, int32(0), cell_idx_ptr);
+            cell_idx_ptr
+        }
     }
 
     fn add_main_fn(&mut self) -> LLVMValueRef {
@@ -164,7 +196,7 @@ impl MidiCompiler {
     fn add_initial_blocks(
         &mut self,
         main_fn: LLVMValueRef,
-    ) -> Option<(LLVMBasicBlockRef, LLVMBasicBlockRef)> {
+    ) -> (LLVMBasicBlockRef, LLVMBasicBlockRef) {
         unsafe {
             // This basic block is empty, but we will add a branch during
             // compilation according to InstrPosition.
@@ -173,13 +205,35 @@ impl MidiCompiler {
             // We'll begin by appending instructions here.
             let start_bb = LLVMAppendBasicBlock(main_fn, self.new_string_ptr("start"));
 
-            Some((init_bb, start_bb))
+            (init_bb, start_bb)
         }
     }
 
-    fn cleanup(&mut self) {
+    fn cleanup(&mut self) -> MCompileResult<()> {
         // free cells datatype
-        todo!();
+        match &self.context {
+            Some(xx) => {
+                self.free_cells(xx.cells_ptr);
+                unsafe {
+                    self.build_return();
+                }
+            },
+            None => return Err(MCompileError::UninitializedContext)
+        }
+        Ok(())
+    }
+
+    fn free_cells(&mut self, cells: LLVMValueRef) {
+        // free the cells pointer
+        unsafe {
+            let mut free_args = vec![cells];
+            self.add_function_call("free", &mut free_args, "free_cells");
+        }
+    }
+
+    unsafe fn build_return(&mut self) {
+        let zero = int32(0);
+        LLVMBuildRet(self.builder, zero);
     }
 
     /// Wrapper around LLVMAddFunction for inserting function declarations into this module
@@ -216,7 +270,7 @@ impl MidiCompiler {
             LLVMPositionBuilderAtEnd(self.builder, bb);
         }
     }
-    ///
+
     /// Create a new CString associated with this LLVMModule,
     /// and return a pointer that can be passed to LLVM APIs.
     /// Assumes s is pure-ASCII.
@@ -260,6 +314,59 @@ impl Drop for MidiCompiler {
     }
 }
 
+// taken from Wilfred's bfc project
+struct TargetMachine {
+    tm: LLVMTargetMachineRef
+}
+
+impl TargetMachine {
+    fn new(target_triple: *const i8) -> MCompileResult<Self> {
+        let mut target = null_mut();
+        let mut err_msg_ptr = null_mut();
+        unsafe {
+            LLVMGetTargetFromTriple(target_triple, &mut target, &mut err_msg_ptr);
+            if target.is_null() {
+                // LLVM couldn't find a target triple with this name,
+                // so it should have given us an error message.
+                assert!(!err_msg_ptr.is_null());
+
+                let err_msg_cstr = CStr::from_ptr(err_msg_ptr as *const _);
+                let err_msg = std::str::from_utf8(err_msg_cstr.to_bytes()).unwrap();
+                return Err(MCompileError::LLVMError(err_msg.to_owned()));
+            }
+        }
+
+        // TODO: do these strings live long enough?
+        // cpu is documented: http://llvm.org/docs/CommandGuide/llc.html#cmdoption-mcpu
+        let cpu = CString::new("generic").unwrap();
+        // features are documented: http://llvm.org/docs/CommandGuide/llc.html#cmdoption-mattr
+        let features = CString::new("").unwrap();
+
+        let target_machine;
+        unsafe {
+            target_machine = LLVMCreateTargetMachine(
+                target,
+                target_triple,
+                cpu.as_ptr() as *const _,
+                features.as_ptr() as *const _,
+                LLVMCodeGenOptLevel::LLVMCodeGenLevelAggressive,
+                LLVMRelocMode::LLVMRelocPIC,
+                LLVMCodeModel::LLVMCodeModelDefault,
+            );
+        }
+
+        Ok(TargetMachine { tm: target_machine })
+    }
+}
+
+impl Drop for TargetMachine {
+    fn drop(&mut self) {
+        unsafe {
+            LLVMDisposeTargetMachine(self.tm);
+        }
+    }
+}
+
 pub fn init_llvm() {
     // TODO: I don't know how much of this I actually need
     unsafe {
@@ -272,15 +379,37 @@ pub fn init_llvm() {
 }
 
 /// Compiles the given `MidiAST` into LLVM IR
-pub fn compile_program(midi_program: MidiAST) {
+pub fn compile_program(midi_program: MidiAST) -> MCompileResult<()> {
     debug!("Initializing LLVM...");
     init_llvm();
     debug!("Creating Module ...");
     let mut midimod = MidiCompiler::new("midilang", None);
-    midimod.init(midi_program.highest_cell() as u64);
-    // allocate data tape
-    // create cell pointer
-    debug!("{midi_program:?}");
-    println!("AAAAAAAAAAAAAA");
-    // unimplemented!()
+    midimod.init(midi_program.highest_cell() as u64)?;
+    midimod.cleanup()?;
+    debug!("Parsing complete!");
+    let ir_cstr = midimod.to_cstring();
+    let ml_ir = String::from_utf8_lossy(ir_cstr.as_bytes());
+    println!("{}", ml_ir);
+    Ok(())
 }
+
+pub fn write_object_code(module: &mut MidiCompiler, path: &str) -> MCompileResult<()> {
+    unsafe {
+        let target_triple = LLVMGetTarget(module.module);
+        let target_machine = TargetMachine::new(target_triple)?;
+
+        let mut obj_error = module.new_mut_string_ptr("Writing object file failed.");
+        let result = LLVMTargetMachineEmitToFile(
+            target_machine.tm,
+            module.module,
+            module.new_string_ptr(path) as *mut i8,
+            LLVMCodeGenFileType::LLVMObjectFile,
+            &mut obj_error,
+        );
+
+        if result != 0 {
+            panic!("obj_error: {:?}", CStr::from_ptr(obj_error as *const _));
+        }
+    }
+    Ok(())
+} 

@@ -18,12 +18,18 @@ pub fn compile_file(file_path: &str) -> Result<i32, Box<dyn Error>> {
     let midi = Smf::parse(&bytes)?;
 
     // parse midi SMF into midi program AST
-    if let Err(mperr) = parser::parse(midi) {
-        error!("Error when parsing file: {:?}", mperr);
-        return Ok(1);
-    }
+    let mprog = match parser::parse(midi) {
+        Err(mperr) => {
+            error!("Error when parsing file: {:?}", mperr);
+            return Ok(1);
+        }
+        Ok(mp) => mp,
+    };
 
-    // compiler::compile(midi_program);
+    if let Err(mcerr) = compiler::compile_program(mprog) {
+        error!("Error when compiling program {:?}", mcerr);
+        return Ok(2);
+    };
     Ok(0)
 }
 

@@ -131,8 +131,8 @@ pub struct PointerMovement {
 impl PointerMovement {
     fn new() -> Self {
         PointerMovement {
-            highest_reached: 0,
-            current_position: 0
+            highest_reached: 1,
+            current_position: 1
         }
     }
 
