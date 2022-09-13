@@ -20,6 +20,9 @@ struct MidilangCli {
 
     #[clap(short, long, action)]
     verbose: bool,
+
+    #[clap(long, action)]
+    dump_llvm: bool,
 }
 
 fn main() {

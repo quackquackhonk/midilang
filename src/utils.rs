@@ -1,6 +1,6 @@
 /// Returns the string name of the executable from the source file name
 pub fn binary_name(src_str: &str) -> String {
-    src_str.strip_suffix(".").unwrap_or(src_str).to_owned()
+    src_str.split('.').next().unwrap_or(src_str).to_owned()
 }
 
 /// Returns the string name of the corresponding midi file from the source file name
@@ -21,7 +21,7 @@ mod tests {
     #[test]
     fn binary_name_tests() {
         assert_eq!(binary_name("test.mid"), "test");
-        assert_eq!(binary_name("path/to/dir/test.bf"), "path/to/dir/test.bf");
+        assert_eq!(binary_name("path/to/dir/test.bf"), "path/to/dir/test");
         assert_eq!(binary_name("no_suffix"), "no_suffix");
     }
 
